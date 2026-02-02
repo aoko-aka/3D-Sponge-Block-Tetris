@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Sponge Block Tetris</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Bungee&display=swap');
+        body { margin: 0; background-color: #0077be; color: white; font-family: 'Bungee', cursive; overflow: hidden; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        .interactive { pointer-events: auto; }
+        canvas { display: block; }
+        #game-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 119, 190, 0.85); display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 100;
+        }
+        .score-animate {
+            animation: pop 0.3s ease-out;
+        }
+        @keyframes pop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); color: #fbbf24; }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-overlay">
+    <h1 id="overlay-title" class="text-5xl font-black mb-6 italic tracking-tighter text-yellow-300 text-center drop-shadow-[0_5px_5px_rgba(0,0,0,0.5)]">SPONGE<br>3D BLOCK</h1>
+    <button id="start-btn" class="interactive px-10 py-4 bg-yellow-400 hover:bg-yellow-300 text-blue-900 rounded-2xl font-bold text-xl transition-transform active:scale-95 shadow-[0_8px_0_rgb(202,138,4)] border-2 border-white">
+        START ADVENTURE
+    </button>
+</div>
+
+<div id="ui-layer" class="p-4 md:p-6 flex flex-col justify-between">
+    <div class="flex justify-between items-start">
+        <div class="bg-yellow-400 p-4 md:p-5 rounded-2xl border-4 border-white shadow-xl text-blue-900">
+            <p class="text-[10px] font-bold uppercase tracking-widest">SCORE</p>
+            <p id="score-val" class="text-2xl md:text-4xl font-black">0</p>
+            <div class="mt-2">
+                <p class="text-[10px] font-bold uppercase">LEVEL</p>
+                <p id="level-val" class="text-lg md:text-xl">1</p>
+            </div>
+        </div>
+        <div class="bg-blue-600/80 p-4 md:p-5 rounded-2xl border-4 border-white text-right shadow-xl">
+            <p class="text-[10px] font-bold text-yellow-300 uppercase">STATUS</p>
+            <div id="status-label" class="text-sm md:text-lg font-bold italic uppercase">READY!</div>
+        </div>
+    </div>
+
+    <!-- Mobile Controls -->
+    <div class="flex justify-center gap-4 md:hidden pb-10">
+        <button id="m-left" class="interactive w-14 h-14 bg-yellow-400 rounded-xl flex items-center justify-center text-blue-900 text-xl border-4 border-white shadow-lg">←</button>
+        <button id="m-rotate" class="interactive w-14 h-14 bg-yellow-400 rounded-xl flex items-center justify-center text-blue-900 text-xl border-4 border-white shadow-lg">↻</button>
+        <button id="m-right" class="interactive w-14 h-14 bg-yellow-400 rounded-xl flex items-center justify-center text-blue-900 text-xl border-4 border-white shadow-lg">→</button>
+        <button id="m-down" class="interactive w-14 h-14 bg-green-400 rounded-xl flex items-center justify-center text-blue-900 text-xl border-4 border-white shadow-lg">↓</button>
+    </div>
+</div>
+
+<script>
+/**
+ * 3D Sponge Block Tetris
+ */
+
+const COLS = 10;
+const ROWS = 20;
+
+// All blocks are variations of Sponge Yellow
+const ANIMAL_CONFIG = {
+    'I': { color: 0xFFEB3B, face: 'happy' },
+    'J': { color: 0xFDD835, face: 'surprised' },
+    'L': { color: 0xFFEE58, face: 'cool' },
+    'O': { color: 0xFFFF00, face: 'wide' },
+    'S': { color: 0xFBC02D, face: 'tongue' },
+    'T': { color: 0xFFF176, face: 'laugh' },
+    'Z': { color: 0xF9A825, face: 'wink' }
+};
+
+const PIECES = {
+    'I': [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+    'J': [[1,0,0],[1,1,1],[0,0,0]],
+    'L': [[0,0,1],[1,1,1],[0,0,0]],
+    'O': [[1,1],[1,1]],
+    'S': [[0,1,1],[1,1,0],[0,0,0]],
+    'T': [[0,1,0],[1,1,1],[0,0,0]],
+    'Z': [[1,1,0],[0,1,1],[0,0,0]]
+};
+
+// --- Three.js Engine ---
+let scene, camera, renderer, gameGroup, particleGroup, bubbleGroup;
+let blocks = []; 
+let particles = [];
+let bubbles = [];
+let currentMeshGroup;
+
+function initThree() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0077be); // Ocean blue
+
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    adjustCamera();
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    // Fog for underwater feel
+    scene.fog = new THREE.FogExp2(0x0077be, 0.02);
+
+    // Lighting
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x004488, 1.2);
+    scene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    dirLight.position.set(5, 20, 10);
+    scene.add(dirLight);
+
+    // Board Elements
+    const bgGeo = new THREE.PlaneGeometry(COLS, ROWS);
+    const bgMat = new THREE.MeshPhongMaterial({ color: 0x005599, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+    const bg = new THREE.Mesh(bgGeo, bgMat);
+    bg.position.set(COLS / 2 - 0.5, ROWS / 2 - 0.5, -0.6);
+    scene.add(bg);
+
+    gameGroup = new THREE.Group();
+    scene.add(gameGroup);
+
+    particleGroup = new THREE.Group();
+    scene.add(particleGroup);
+
+    bubbleGroup = new THREE.Group();
+    scene.add(bubbleGroup);
+
+    createInitialBubbles();
+}
+
+function adjustCamera() {
+    const aspect = window.innerWidth / window.innerHeight;
+    let zPos = aspect < 0.6 ? 22 : 16;
+    camera.position.set(COLS / 2 - 0.5, ROWS / 2, zPos);
+    camera.lookAt(COLS / 2 - 0.5, ROWS / 2, 0);
+}
+
+// --- Sponge Detail Creation ---
+function createSpongeCube(x, y, type, isGhost = false) {
+    const group = new THREE.Group();
+    const geometry = new THREE.BoxGeometry(0.92, 0.92, 0.92);
+    const config = ANIMAL_CONFIG[type];
+    
+    const material = new THREE.MeshPhongMaterial({ 
+        color: config.color,
+        transparent: isGhost,
+        opacity: isGhost ? 0.2 : 1.0,
+        flatShading: true
+    });
+    
+    const cube = new THREE.Mesh(geometry, material);
+    group.add(cube);
+    
+    if (!isGhost) {
+        // Sponge Holes (Craters)
+        const holeGeo = new THREE.CircleGeometry(0.08, 8);
+        const holeMat = new THREE.MeshBasicMaterial({ color: 0xd4af37, transparent: true, opacity: 0.4 });
+        
+        for(let i=0; i<5; i++) {
+            const hole = new THREE.Mesh(holeGeo, holeMat);
+            hole.position.set((Math.random()-0.5)*0.7, (Math.random()-0.5)*0.7, 0.465);
+            cube.add(hole);
+        }
+
+        // Face
+        // Eyes
+        const eyeWhiteGeo = new THREE.BoxGeometry(0.2, 0.25, 0.05);
+        const eyeWhiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const pupilGeo = new THREE.BoxGeometry(0.08, 0.08, 0.06);
+        const pupilMat = new THREE.MeshBasicMaterial({ color: 0x0099ff }); // Blue eyes like SpongeBob
+
+        [-0.18, 0.18].forEach(ox => {
+            const eye = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat);
+            eye.position.set(ox, 0.15, 0.47);
+            cube.add(eye);
+            
+            const pupil = new THREE.Mesh(pupilGeo, pupilMat);
+            pupil.position.set(0, 0, 0.01);
+            eye.add(pupil);
+        });
+
+        // Mouth (Silly teeth)
+        const mouthGeo = new THREE.BoxGeometry(0.3, 0.1, 0.05);
+        const mouthMat = new THREE.MeshBasicMaterial({ color: 0x880000 });
+        const mouth = new THREE.Mesh(mouthGeo, mouthMat);
+        mouth.position.set(0, -0.15, 0.47);
+        cube.add(mouth);
+
+        const toothGeo = new THREE.BoxGeometry(0.08, 0.08, 0.06);
+        const toothMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        [-0.06, 0.06].forEach(tx => {
+            const tooth = new THREE.Mesh(toothGeo, toothMat);
+            tooth.position.set(tx, -0.05, 0.01);
+            mouth.add(tooth);
+        });
+    }
+
+    group.position.set(x, ROWS - 1 - y, 0);
+    return group;
+}
+
+// --- Effects Engine ---
+class Bubble {
+    constructor() {
+        const geo = new THREE.SphereGeometry(Math.random() * 0.2 + 0.05, 8, 8);
+        const mat = new THREE.MeshPhongMaterial({ color: 0xffffff, transparent: true, opacity: 0.3 });
+        this.mesh = new THREE.Mesh(geo, mat);
+        this.reset();
+    }
+    reset() {
+        this.mesh.position.set(Math.random() * COLS, -2, (Math.random() - 0.5) * 5);
+        this.speed = 0.02 + Math.random() * 0.05;
+    }
+    update() {
+        this.mesh.position.y += this.speed;
+        this.mesh.position.x += Math.sin(this.mesh.position.y) * 0.01;
+        if (this.mesh.position.y > ROWS + 2) this.reset();
+    }
+}
+
+function createInitialBubbles() {
+    for(let i=0; i<30; i++) {
+        const b = new Bubble();
+        b.mesh.position.y = Math.random() * ROWS;
+        bubbles.push(b);
+        bubbleGroup.add(b.mesh);
+    }
+}
+
+class ExplodingParticle {
+    constructor(x, y, color) {
+        const geo = new THREE.BoxGeometry(0.15, 0.15, 0.15);
+        const mat = new THREE.MeshPhongMaterial({ color: color, emissive: color, emissiveIntensity: 0.3 });
+        this.mesh = new THREE.Mesh(geo, mat);
+        this.mesh.position.set(x, y, 0);
+        
+        const speed = 0.05 + Math.random() * 0.15;
+        const angle = Math.random() * Math.PI * 2;
+        this.velocity = new THREE.Vector3(Math.cos(angle) * speed, Math.sin(angle) * speed, (Math.random() - 0.5) * speed);
+        this.life = 1.0;
+        this.decay = 0.02 + Math.random() * 0.02;
+    }
+    update() {
+        this.mesh.position.add(this.velocity);
+        this.life -= this.decay;
+        this.mesh.scale.setScalar(Math.max(0.001, this.life));
+        return this.life > 0;
+    }
+}
+
+function createExplosion(x, y, color, count = 15) {
+    for (let i = 0; i < count; i++) {
+        const p = new ExplodingParticle(x, y, color);
+        particles.push(p);
+        particleGroup.add(p.mesh);
+    }
+}
+
+// --- Game Logic ---
+let arena = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+let player = { pos: { x: 3, y: 0 }, matrix: null, type: null, score: 0, level: 1 };
+let isPaused = true;
+let dropCounter = 0;
+let lastTime = 0;
+
+function resetPlayer() {
+    const types = 'ILJOTSZ';
+    player.type = types[Math.floor(Math.random() * types.length)];
+    player.matrix = PIECES[player.type];
+    player.pos.y = 0;
+    player.pos.x = Math.floor(COLS / 2) - Math.floor(player.matrix[0].length / 2);
+    if (collide()) gameOver();
+    updateThreePlayer();
+}
+
+function collide(offsetX = 0, offsetY = 0, matrix = player.matrix) {
+    for (let y = 0; y < matrix.length; y++) {
+        for (let x = 0; x < matrix[y].length; x++) {
+            if (matrix[y][x] !== 0) {
+                const newX = player.pos.x + x + offsetX;
+                const newY = player.pos.y + y + offsetY;
+                if (newX < 0 || newX >= COLS || newY >= ROWS || (newY >= 0 && arena[newY][newX])) return true;
+            }
+        }
+    }
+    return false;
+}
+
+function merge() {
+    player.matrix.forEach((row, y) => {
+        row.forEach((value, x) => {
+            if (value !== 0) {
+                const ay = player.pos.y + y;
+                const ax = player.pos.x + x;
+                arena[ay][ax] = player.type;
+                createExplosion(ax, ROWS - 1 - ay, 0xffffff, 3);
+            }
+        });
+    });
+}
+
+function arenaSweep() {
+    let clearedCount = 0;
+    for (let y = ROWS - 1; y >= 0; y--) {
+        if (arena[y].every(cell => cell !== 0)) {
+            for (let x = 0; x < COLS; x++) {
+                createExplosion(x, ROWS - 1 - y, 0xFFFF00, 20);
+            }
+            arena.splice(y, 1);
+            arena.unshift(Array(COLS).fill(0));
+            clearedCount++;
+            y++;
+        }
+    }
+    if (clearedCount > 0) {
+        player.score += [0, 100, 300, 500, 1200][clearedCount] * player.level;
+        player.level = Math.floor(player.score / 1000) + 1;
+        const s = document.getElementById('score-val');
+        s.innerText = player.score;
+        s.classList.remove('score-animate');
+        void s.offsetWidth;
+        s.classList.add('score-animate');
+        document.getElementById('level-val').innerText = player.level;
+        document.getElementById('status-label').innerText = clearedCount === 4 ? "SPONGE-TASTIC!" : "GOOD JOB!";
+        updateThreeArena();
+        setTimeout(() => { if(!isPaused) document.getElementById('status-label').innerText = "PLAYING"; }, 800);
+    }
+}
+
+// --- Render Updates ---
+function updateThreePlayer() {
+    if (currentMeshGroup) gameGroup.remove(currentMeshGroup);
+    currentMeshGroup = new THREE.Group();
+    player.matrix.forEach((row, y) => {
+        row.forEach((value, x) => {
+            if (value !== 0) {
+                const cube = createSpongeCube(player.pos.x + x, player.pos.y + y, player.type);
+                currentMeshGroup.add(cube);
+            }
+        });
+    });
+    gameGroup.add(currentMeshGroup);
+}
+
+function updateThreeArena() {
+    blocks.forEach(b => gameGroup.remove(b));
+    blocks = [];
+    arena.forEach((row, y) => {
+        row.forEach((type, x) => {
+            if (type !== 0) {
+                const cube = createSpongeCube(x, y, type);
+                blocks.push(cube);
+                gameGroup.add(cube);
+            }
+        });
+    });
+}
+
+function gameLoop(time = 0) {
+    if (isPaused) return;
+    const deltaTime = time - lastTime;
+    lastTime = time;
+    dropCounter += deltaTime;
+    const dropInterval = Math.max(100, 1000 - (player.level - 1) * 110);
+
+    if (dropCounter > dropInterval) drop();
+
+    bubbles.forEach(b => b.update());
+    for (let i = particles.length - 1; i >= 0; i--) {
+        if (!particles[i].update()) {
+            particleGroup.remove(particles[i].mesh);
+            particles.splice(i, 1);
+        }
+    }
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(gameLoop);
+}
+
+function drop() {
+    if (!collide(0, 1)) {
+        player.pos.y++;
+    } else {
+        merge();
+        arenaSweep();
+        updateThreeArena();
+        resetPlayer();
+    }
+    dropCounter = 0;
+    updateThreePlayer();
+}
+
+function move(dir) {
+    if (!collide(dir, 0)) {
+        player.pos.x += dir;
+        updateThreePlayer();
+    }
+}
+
+function rotatePlayer() {
+    const rotated = player.matrix[0].map((_, i) => player.matrix.map(row => row[i]).reverse());
+    const prevMatrix = player.matrix;
+    player.matrix = rotated;
+    if (collide()) player.matrix = prevMatrix;
+    updateThreePlayer();
+}
+
+function gameOver() {
+    isPaused = true;
+    document.getElementById('game-overlay').style.display = 'flex';
+    document.getElementById('overlay-title').innerText = "I'M NOT READY...";
+    document.getElementById('status-label').innerText = "AW NUTS";
+}
+
+// --- Setup ---
+document.getElementById('start-btn').addEventListener('click', () => {
+    document.getElementById('game-overlay').style.display = 'none';
+    isPaused = false;
+    arena = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+    player.score = 0;
+    player.level = 1;
+    document.getElementById('score-val').innerText = "0";
+    document.getElementById('level-val').innerText = "1";
+    document.getElementById('status-label').innerText = "PLAYING";
+    updateThreeArena();
+    resetPlayer();
+    lastTime = performance.now();
+    gameLoop();
+});
+
+window.addEventListener('keydown', e => {
+    if (isPaused) return;
+    if (e.key === 'ArrowLeft') move(-1);
+    if (e.key === 'ArrowRight') move(1);
+    if (e.key === 'ArrowDown') drop();
+    if (e.key === 'ArrowUp') rotatePlayer();
+});
+
+document.getElementById('m-left').addEventListener('click', () => move(-1));
+document.getElementById('m-right').addEventListener('click', () => move(1));
+document.getElementById('m-rotate').addEventListener('click', () => rotatePlayer());
+document.getElementById('m-down').addEventListener('click', () => drop());
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    adjustCamera();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+window.onload = () => {
+    initThree();
+    renderer.render(scene, camera);
+};
+
+</script>
+</body>
+</html>
