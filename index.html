@@ -13,27 +13,46 @@
             -webkit-tap-highlight-color: transparent;
             user-select: none;
             -webkit-user-select: none;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            position: fixed; /* iOSでのスクロールを物理的に防ぐ */
+            background-color: #0077be;
+            /* スクロールによるリフレッシュやバウンスを禁止 */
+            overscroll-behavior: none;
+            touch-action: none;
         }
 
         body { 
-            margin: 0; 
-            background-color: #0077be; 
             color: white; 
             font-family: 'Bungee', cursive; 
-            overflow: hidden; 
-            touch-action: none; /* 全体でのズーム・スクロールを禁止 */
-            position: fixed; /* 画面のバウンスを防止 */
-            width: 100%;
-            height: 100%;
         }
 
-        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        #ui-layer { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            pointer-events: none; 
+            z-index: 10; 
+            /* セーフエリア対応（iPhoneのノッチ対策） */
+            padding-top: env(safe-area-inset-top);
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
         .interactive { pointer-events: auto; touch-action: none; }
         canvas { display: block; touch-action: none; }
 
         #game-overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 119, 190, 0.85); display: flex; flex-direction: column;
+            background: rgba(0, 119, 190, 0.9); display: flex; flex-direction: column;
             align-items: center; justify-content: center; z-index: 100;
             pointer-events: auto;
         }
@@ -50,7 +69,7 @@
 
         .btn-push {
             transition: transform 0.1s;
-            touch-action: none; /* ボタン上でのズームを個別に禁止 */
+            touch-action: none;
         }
 
         .btn-push:active {
@@ -85,18 +104,29 @@
     </div>
 
     <!-- Mobile Controls -->
-    <div class="flex justify-center gap-4 md:hidden pb-10">
-        <button id="m-left" class="interactive btn-push w-14 h-14 bg-yellow-400 rounded-xl flex items-center justify-center text-blue-900 text-xl border-4 border-white shadow-[0_4px_0_rgb(202,138,4)]">←</button>
-        <button id="m-rotate" class="interactive btn-push w-14 h-14 bg-yellow-400 rounded-xl flex items-center justify-center text-blue-900 text-xl border-4 border-white shadow-[0_4px_0_rgb(202,138,4)]">↻</button>
-        <button id="m-right" class="interactive btn-push w-14 h-14 bg-yellow-400 rounded-xl flex items-center justify-center text-blue-900 text-xl border-4 border-white shadow-[0_4px_0_rgb(202,138,4)]">→</button>
-        <button id="m-down" class="interactive btn-push w-14 h-14 bg-green-400 rounded-xl flex items-center justify-center text-blue-900 text-xl border-4 border-white shadow-[0_4px_0_rgb(21,128,61)]">↓</button>
+    <div class="flex justify-center gap-4 md:hidden pb-12">
+        <button id="m-left" class="interactive btn-push w-16 h-16 bg-yellow-400 rounded-xl flex items-center justify-center text-blue-900 text-2xl border-4 border-white shadow-[0_4px_0_rgb(202,138,4)]">←</button>
+        <button id="m-rotate" class="interactive btn-push w-16 h-16 bg-yellow-400 rounded-xl flex items-center justify-center text-blue-900 text-2xl border-4 border-white shadow-[0_4px_0_rgb(202,138,4)]">↻</button>
+        <button id="m-right" class="interactive btn-push w-16 h-16 bg-yellow-400 rounded-xl flex items-center justify-center text-blue-900 text-2xl border-4 border-white shadow-[0_4px_0_rgb(202,138,4)]">→</button>
+        <button id="m-down" class="interactive btn-push w-16 h-16 bg-green-400 rounded-xl flex items-center justify-center text-blue-900 text-2xl border-4 border-white shadow-[0_4px_0_rgb(21,128,61)]">↓</button>
     </div>
 </div>
 
 <script>
 /**
- * 3D Sponge Block Tetris - Anti-Zoom Optimized
+ * 3D Sponge Block Tetris - Full Mobile Lock Edition
  */
+
+// 強制的にブラウザのデフォルト挙動を阻止
+window.addEventListener('touchmove', (e) => {
+    if (e.touches.length > 1 || e.scale !== 1) {
+        e.preventDefault();
+    }
+}, { passive: false });
+
+document.addEventListener('gesturestart', (e) => {
+    e.preventDefault();
+});
 
 const COLS = 10;
 const ROWS = 20;
@@ -456,7 +486,7 @@ window.addEventListener('keydown', e => {
     if (e.key === 'ArrowUp') rotatePlayer();
 });
 
-// Touch controls optimized to prevent system gestures
+// Touch controls 
 const controls = [
     { id: 'm-left', action: () => move(-1) },
     { id: 'm-right', action: () => move(1) },
@@ -466,33 +496,11 @@ const controls = [
 
 controls.forEach(c => {
     const el = document.getElementById(c.id);
-    // Use touchstart for immediate response and preventDefault to stop zoom/scroll
     el.addEventListener('touchstart', (e) => {
         e.preventDefault();
         if (!isPaused) c.action();
     }, { passive: false });
-    
-    // Prevent mouse clicks from triggering zoom as well
-    el.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-    });
 });
-
-// Global double-tap zoom prevention (Safari fallback)
-document.addEventListener('touchstart', (e) => {
-    if (e.touches.length > 1) {
-        e.preventDefault();
-    }
-}, { passive: false });
-
-let lastTouchEnd = 0;
-document.addEventListener('touchend', (e) => {
-    const now = (new Date()).getTime();
-    if (now - lastTouchEnd <= 300) {
-        e.preventDefault();
-    }
-    lastTouchEnd = now;
-}, false);
 
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
