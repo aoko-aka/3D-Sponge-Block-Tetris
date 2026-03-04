@@ -2,28 +2,59 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>3D Sponge Block Tetris</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Bungee&display=swap');
-        body { margin: 0; background-color: #0077be; color: white; font-family: 'Bungee', cursive; overflow: hidden; }
+        
+        * {
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body { 
+            margin: 0; 
+            background-color: #0077be; 
+            color: white; 
+            font-family: 'Bungee', cursive; 
+            overflow: hidden; 
+            touch-action: none; /* 全体でのズーム・スクロールを禁止 */
+            position: fixed; /* 画面のバウンスを防止 */
+            width: 100%;
+            height: 100%;
+        }
+
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
-        .interactive { pointer-events: auto; }
-        canvas { display: block; }
+        .interactive { pointer-events: auto; touch-action: none; }
+        canvas { display: block; touch-action: none; }
+
         #game-overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0, 119, 190, 0.85); display: flex; flex-direction: column;
             align-items: center; justify-content: center; z-index: 100;
+            pointer-events: auto;
         }
+
         .score-animate {
             animation: pop 0.3s ease-out;
         }
+
         @keyframes pop {
             0% { transform: scale(1); }
             50% { transform: scale(1.2); color: #fbbf24; }
             100% { transform: scale(1); }
+        }
+
+        .btn-push {
+            transition: transform 0.1s;
+            touch-action: none; /* ボタン上でのズームを個別に禁止 */
+        }
+
+        .btn-push:active {
+            transform: scale(0.9) translateY(4px);
         }
     </style>
 </head>
@@ -34,6 +65,7 @@
     <button id="start-btn" class="interactive px-10 py-4 bg-yellow-400 hover:bg-yellow-300 text-blue-900 rounded-2xl font-bold text-xl transition-transform active:scale-95 shadow-[0_8px_0_rgb(202,138,4)] border-2 border-white">
         START ADVENTURE
     </button>
+    <p class="text-white/60 text-xs mt-8 uppercase tracking-widest">Use Arrows or Buttons to Move</p>
 </div>
 
 <div id="ui-layer" class="p-4 md:p-6 flex flex-col justify-between">
@@ -54,30 +86,29 @@
 
     <!-- Mobile Controls -->
     <div class="flex justify-center gap-4 md:hidden pb-10">
-        <button id="m-left" class="interactive w-14 h-14 bg-yellow-400 rounded-xl flex items-center justify-center text-blue-900 text-xl border-4 border-white shadow-lg">←</button>
-        <button id="m-rotate" class="interactive w-14 h-14 bg-yellow-400 rounded-xl flex items-center justify-center text-blue-900 text-xl border-4 border-white shadow-lg">↻</button>
-        <button id="m-right" class="interactive w-14 h-14 bg-yellow-400 rounded-xl flex items-center justify-center text-blue-900 text-xl border-4 border-white shadow-lg">→</button>
-        <button id="m-down" class="interactive w-14 h-14 bg-green-400 rounded-xl flex items-center justify-center text-blue-900 text-xl border-4 border-white shadow-lg">↓</button>
+        <button id="m-left" class="interactive btn-push w-14 h-14 bg-yellow-400 rounded-xl flex items-center justify-center text-blue-900 text-xl border-4 border-white shadow-[0_4px_0_rgb(202,138,4)]">←</button>
+        <button id="m-rotate" class="interactive btn-push w-14 h-14 bg-yellow-400 rounded-xl flex items-center justify-center text-blue-900 text-xl border-4 border-white shadow-[0_4px_0_rgb(202,138,4)]">↻</button>
+        <button id="m-right" class="interactive btn-push w-14 h-14 bg-yellow-400 rounded-xl flex items-center justify-center text-blue-900 text-xl border-4 border-white shadow-[0_4px_0_rgb(202,138,4)]">→</button>
+        <button id="m-down" class="interactive btn-push w-14 h-14 bg-green-400 rounded-xl flex items-center justify-center text-blue-900 text-xl border-4 border-white shadow-[0_4px_0_rgb(21,128,61)]">↓</button>
     </div>
 </div>
 
 <script>
 /**
- * 3D Sponge Block Tetris
+ * 3D Sponge Block Tetris - Anti-Zoom Optimized
  */
 
 const COLS = 10;
 const ROWS = 20;
 
-// All blocks are variations of Sponge Yellow
 const ANIMAL_CONFIG = {
-    'I': { color: 0xFFEB3B, face: 'happy' },
-    'J': { color: 0xFDD835, face: 'surprised' },
-    'L': { color: 0xFFEE58, face: 'cool' },
-    'O': { color: 0xFFFF00, face: 'wide' },
-    'S': { color: 0xFBC02D, face: 'tongue' },
-    'T': { color: 0xFFF176, face: 'laugh' },
-    'Z': { color: 0xF9A825, face: 'wink' }
+    'I': { color: 0xFFEB3B },
+    'J': { color: 0xFDD835 },
+    'L': { color: 0xFFEE58 },
+    'O': { color: 0xFFFF00 },
+    'S': { color: 0xFBC02D },
+    'T': { color: 0xFFF176 },
+    'Z': { color: 0xF9A825 }
 };
 
 const PIECES = {
@@ -90,7 +121,6 @@ const PIECES = {
     'Z': [[1,1,0],[0,1,1],[0,0,0]]
 };
 
-// --- Three.js Engine ---
 let scene, camera, renderer, gameGroup, particleGroup, bubbleGroup;
 let blocks = []; 
 let particles = [];
@@ -99,20 +129,19 @@ let currentMeshGroup;
 
 function initThree() {
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0077be); // Ocean blue
+    scene.background = new THREE.Color(0x0077be); 
 
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     adjustCamera();
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
 
-    // Fog for underwater feel
     scene.fog = new THREE.FogExp2(0x0077be, 0.02);
 
-    // Lighting
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x004488, 1.2);
     scene.add(hemiLight);
 
@@ -120,7 +149,6 @@ function initThree() {
     dirLight.position.set(5, 20, 10);
     scene.add(dirLight);
 
-    // Board Elements
     const bgGeo = new THREE.PlaneGeometry(COLS, ROWS);
     const bgMat = new THREE.MeshPhongMaterial({ color: 0x005599, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
     const bg = new THREE.Mesh(bgGeo, bgMat);
@@ -146,7 +174,6 @@ function adjustCamera() {
     camera.lookAt(COLS / 2 - 0.5, ROWS / 2, 0);
 }
 
-// --- Sponge Detail Creation ---
 function createSpongeCube(x, y, type, isGhost = false) {
     const group = new THREE.Group();
     const geometry = new THREE.BoxGeometry(0.92, 0.92, 0.92);
@@ -163,40 +190,30 @@ function createSpongeCube(x, y, type, isGhost = false) {
     group.add(cube);
     
     if (!isGhost) {
-        // Sponge Holes (Craters)
         const holeGeo = new THREE.CircleGeometry(0.08, 8);
         const holeMat = new THREE.MeshBasicMaterial({ color: 0xd4af37, transparent: true, opacity: 0.4 });
-        
         for(let i=0; i<5; i++) {
             const hole = new THREE.Mesh(holeGeo, holeMat);
             hole.position.set((Math.random()-0.5)*0.7, (Math.random()-0.5)*0.7, 0.465);
             cube.add(hole);
         }
-
-        // Face
-        // Eyes
         const eyeWhiteGeo = new THREE.BoxGeometry(0.2, 0.25, 0.05);
         const eyeWhiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
         const pupilGeo = new THREE.BoxGeometry(0.08, 0.08, 0.06);
-        const pupilMat = new THREE.MeshBasicMaterial({ color: 0x0099ff }); // Blue eyes like SpongeBob
-
+        const pupilMat = new THREE.MeshBasicMaterial({ color: 0x0099ff });
         [-0.18, 0.18].forEach(ox => {
             const eye = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat);
             eye.position.set(ox, 0.15, 0.47);
             cube.add(eye);
-            
             const pupil = new THREE.Mesh(pupilGeo, pupilMat);
             pupil.position.set(0, 0, 0.01);
             eye.add(pupil);
         });
-
-        // Mouth (Silly teeth)
         const mouthGeo = new THREE.BoxGeometry(0.3, 0.1, 0.05);
         const mouthMat = new THREE.MeshBasicMaterial({ color: 0x880000 });
         const mouth = new THREE.Mesh(mouthGeo, mouthMat);
         mouth.position.set(0, -0.15, 0.47);
         cube.add(mouth);
-
         const toothGeo = new THREE.BoxGeometry(0.08, 0.08, 0.06);
         const toothMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
         [-0.06, 0.06].forEach(tx => {
@@ -205,12 +222,10 @@ function createSpongeCube(x, y, type, isGhost = false) {
             mouth.add(tooth);
         });
     }
-
     group.position.set(x, ROWS - 1 - y, 0);
     return group;
 }
 
-// --- Effects Engine ---
 class Bubble {
     constructor() {
         const geo = new THREE.SphereGeometry(Math.random() * 0.2 + 0.05, 8, 8);
@@ -244,7 +259,6 @@ class ExplodingParticle {
         const mat = new THREE.MeshPhongMaterial({ color: color, emissive: color, emissiveIntensity: 0.3 });
         this.mesh = new THREE.Mesh(geo, mat);
         this.mesh.position.set(x, y, 0);
-        
         const speed = 0.05 + Math.random() * 0.15;
         const angle = Math.random() * Math.PI * 2;
         this.velocity = new THREE.Vector3(Math.cos(angle) * speed, Math.sin(angle) * speed, (Math.random() - 0.5) * speed);
@@ -267,7 +281,6 @@ function createExplosion(x, y, color, count = 15) {
     }
 }
 
-// --- Game Logic ---
 let arena = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
 let player = { pos: { x: 3, y: 0 }, matrix: null, type: null, score: 0, level: 1 };
 let isPaused = true;
@@ -338,7 +351,6 @@ function arenaSweep() {
     }
 }
 
-// --- Render Updates ---
 function updateThreePlayer() {
     if (currentMeshGroup) gameGroup.remove(currentMeshGroup);
     currentMeshGroup = new THREE.Group();
@@ -373,9 +385,7 @@ function gameLoop(time = 0) {
     lastTime = time;
     dropCounter += deltaTime;
     const dropInterval = Math.max(100, 1000 - (player.level - 1) * 110);
-
     if (dropCounter > dropInterval) drop();
-
     bubbles.forEach(b => b.update());
     for (let i = particles.length - 1; i >= 0; i--) {
         if (!particles[i].update()) {
@@ -383,7 +393,6 @@ function gameLoop(time = 0) {
             particles.splice(i, 1);
         }
     }
-
     renderer.render(scene, camera);
     requestAnimationFrame(gameLoop);
 }
@@ -423,8 +432,8 @@ function gameOver() {
     document.getElementById('status-label').innerText = "AW NUTS";
 }
 
-// --- Setup ---
-document.getElementById('start-btn').addEventListener('click', () => {
+document.getElementById('start-btn').addEventListener('click', (e) => {
+    e.preventDefault();
     document.getElementById('game-overlay').style.display = 'none';
     isPaused = false;
     arena = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
@@ -447,10 +456,43 @@ window.addEventListener('keydown', e => {
     if (e.key === 'ArrowUp') rotatePlayer();
 });
 
-document.getElementById('m-left').addEventListener('click', () => move(-1));
-document.getElementById('m-right').addEventListener('click', () => move(1));
-document.getElementById('m-rotate').addEventListener('click', () => rotatePlayer());
-document.getElementById('m-down').addEventListener('click', () => drop());
+// Touch controls optimized to prevent system gestures
+const controls = [
+    { id: 'm-left', action: () => move(-1) },
+    { id: 'm-right', action: () => move(1) },
+    { id: 'm-rotate', action: () => rotatePlayer() },
+    { id: 'm-down', action: () => drop() }
+];
+
+controls.forEach(c => {
+    const el = document.getElementById(c.id);
+    // Use touchstart for immediate response and preventDefault to stop zoom/scroll
+    el.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (!isPaused) c.action();
+    }, { passive: false });
+    
+    // Prevent mouse clicks from triggering zoom as well
+    el.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+    });
+});
+
+// Global double-tap zoom prevention (Safari fallback)
+document.addEventListener('touchstart', (e) => {
+    if (e.touches.length > 1) {
+        e.preventDefault();
+    }
+}, { passive: false });
+
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => {
+    const now = (new Date()).getTime();
+    if (now - lastTouchEnd <= 300) {
+        e.preventDefault();
+    }
+    lastTouchEnd = now;
+}, false);
 
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
